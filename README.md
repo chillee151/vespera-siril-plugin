@@ -1,12 +1,52 @@
-# Vespera Pro Siril Plugin
+# Vespera Pro Siril Plugins
 
-A Python plugin for [Siril](https://siril.org/) that provides optimized preprocessing workflows for **Vaonis Vespera Pro** smart telescope data.
+Python plugins for [Siril](https://siril.org/) that provide optimized workflows for **Vaonis Vespera Pro** smart telescope data.
 
 ![Siril Version](https://img.shields.io/badge/Siril-1.4%2B-blue)
 ![Python](https://img.shields.io/badge/Python-3.9%2B-green)
 ![License](https://img.shields.io/badge/License-Apache%202.0-orange)
 
-## Features
+## Included Plugins
+
+| Plugin | Purpose |
+|--------|---------|
+| **Vespera Pro Drizzle** | Bayer Drizzle stacking for raw FITS files |
+| **Vespera Quick Prep** | One-click preparation for 16-bit TIFFs → VeraLux HMS |
+
+---
+
+## Vespera Quick Prep
+
+A streamlined preparation plugin that automates the tedious pre-stretch workflow for Vespera's 16-bit TIFF output.
+
+### What It Does
+
+**Before:** Load TIFF → Background extraction → Plate solve → Color calibrate → Launch stretch tool (5+ clicks)
+
+**After:** Load TIFF → Click "Prep Image" → Done!
+
+### Features
+
+- **Background Extraction**: GraXpert AI (recommended) or Siril RBF
+- **Calibration**: Automatic plate solve + Photometric Color Calibration
+- **Denoising** (optional): VeraLux Silentium, GraXpert AI, or Cosmic Clarity
+- **Auto-Launch**: Opens VeraLux HMS when complete
+
+### Usage
+
+1. Load your Vespera 16-bit TIFF in Siril
+2. Go to **Scripts** menu → **Vespera_Quick_Prep**
+3. Configure options (or use defaults)
+4. Click **Prep Image**
+5. VeraLux HMS opens with your color-calibrated, gradient-free image ready to stretch
+
+---
+
+## Vespera Pro Drizzle
+
+Bayer Drizzle processing for restacking raw Vespera FITS files with improved quality.
+
+### Features
 
 - **Zero Setup Required** - Reads native Vespera Pro folder structure directly, no file reorganization needed
 - **Bayer Drizzle Processing** - Optimized for alt-az field rotation
@@ -32,24 +72,32 @@ A Python plugin for [Siril](https://siril.org/) that provides optimized preproce
 
 ### macOS
 
-Copy the plugin to your Siril scripts directory:
+Copy both plugins to your Siril scripts directory:
 
 ```bash
-cp Vespera_Pro_Drizzle.py ~/Library/Application\ Support/org.siril.Siril/scripts/
+cp Vespera_Pro_Drizzle.py Vespera_Quick_Prep.py ~/Library/Application\ Support/org.siril.Siril/siril-scripts/
 ```
 
 ### Linux
 
 ```bash
-cp Vespera_Pro_Drizzle.py ~/.local/share/siril/scripts/
+cp Vespera_Pro_Drizzle.py Vespera_Quick_Prep.py ~/.local/share/siril/scripts/
 ```
 
 ### Windows
 
 ```
-Copy Vespera_Pro_Drizzle.py to:
+Copy both .py files to:
 %LOCALAPPDATA%\siril\scripts\
 ```
+
+### Dependencies for Quick Prep
+
+Quick Prep integrates with these optional tools (if installed):
+- **GraXpert-AI.py** - AI background extraction (install via Siril Scripts menu)
+- **VeraLux HMS** - HyperMetric Stretch (available from veralux.space)
+- **VeraLux Silentium** - Wavelet denoiser (available from veralux.space)
+- **Cosmic Clarity** - AI denoiser (available from setiastro.com)
 
 ## Usage
 
