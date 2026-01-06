@@ -1052,16 +1052,33 @@ class VesperaProGUI(QDialog):
         info_text.setHtml("""
         <h3 style="color: #88aaff;">Vespera Pro Preprocessing</h3>
 
-        <p><b>Folder Structure Required:</b></p>
-        <pre style="color: #88ff88;">
-observation_folder/
-├── darks/    (1+ dark frames)
-├── lights/   (light frames)
-├── process/  (auto-created)
-└── masters/  (auto-created)
-        </pre>
+        <p><b>No Setup Required!</b></p>
+        <p>Just point this plugin at your Vespera observation folder. It auto-detects
+        darks vs lights by filename - no file reorganization needed.</p>
 
-        <p><b>Filter Options:</b></p>
+        <hr style="border-color: #444;">
+        <h4 style="color: #88aaff;">Why Restack? (vs Vespera's Built-in)</h4>
+
+        <p>Vespera already outputs a stacked TIFF. This plugin restacks from raw FITS for better quality:</p>
+
+        <table style="color: #e0e0e0; margin: 10px 0;">
+        <tr><td><b>Vespera:</b></td><td>Debayer → Stack (loses sub-pixel info)</td></tr>
+        <tr><td><b>This Plugin:</b></td><td>Stack → Debayer (preserves CFA data)</td></tr>
+        </table>
+
+        <p><b>Benefits of Restacking:</b></p>
+        <ul>
+        <li>~20% sharper color detail from Bayer Drizzle</li>
+        <li>Sigma rejection removes satellites &amp; planes</li>
+        <li>32-bit output (vs 16-bit) for more stretching headroom</li>
+        <li>Your actual darks (vs Vespera's algorithmic BalENS)</li>
+        <li>Proper Ha/OIII extraction for dual-band filters</li>
+        </ul>
+
+        <p><i>For social media, Vespera TIFF is fine. For prints, restack here.</i></p>
+
+        <hr style="border-color: #444;">
+        <h4 style="color: #88aaff;">Filter Options</h4>
         <ul>
         <li><b>No Filter:</b> Standard RGB processing</li>
         <li><b>SVBONY SV220:</b> Extracts Ha and OIII channels, creates HOO composite</li>
@@ -1069,16 +1086,12 @@ observation_folder/
         <li><b>Ha/OIII Narrowband:</b> Single channel extraction</li>
         </ul>
 
-        <p><b>Sky Quality:</b></p>
-        <p>Adjusts sigma rejection and gradient handling based on light pollution levels.</p>
-
         <hr style="border-color: #444;">
-        <h4 style="color: #88aaff;">Understanding Drizzle & Pattern Artifacts</h4>
+        <h4 style="color: #88aaff;">Drizzle & Pattern Artifacts</h4>
 
         <p><b>Why Bayer Drizzle?</b></p>
-        <p>The Vespera Pro uses an alt-az mount, causing field rotation during imaging sessions
-        (typically 10-15° per hour). Bayer Drizzle handles this rotation while preserving the
-        CFA (Bayer) pattern data, avoiding debayering artifacts.</p>
+        <p>The Vespera Pro's alt-az mount causes field rotation (10-15° per hour).
+        Bayer Drizzle handles this while preserving CFA pattern data.</p>
 
         <p><b>Checkerboard/Grid Patterns:</b></p>
         <p>If you see checkerboard or moiré patterns in your stacked image, this is caused by

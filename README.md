@@ -125,6 +125,46 @@ The plugin removes ICC profiles for compatibility. If colors are off:
 
 This is normal during dark calibration and can be ignored if processing completes.
 
+## Why Restack in Siril? (vs Vespera's Built-in Stacking)
+
+The Vespera Pro already stacks images internally and outputs a ready-to-process TIFF. So why restack with this plugin?
+
+### How Vespera Stacks vs How This Plugin Stacks
+
+| Aspect | Vespera Internal | This Plugin (Bayer Drizzle) |
+|--------|------------------|----------------------------|
+| **Processing Order** | Debayer → Register → Stack | Register → Stack → Debayer |
+| **Calibration** | BalENS (algorithmic universal dark) | Your actual captured darks |
+| **Bad Frame Rejection** | Automatic (proprietary) | Sigma rejection (removes satellites, planes) |
+| **Output Bit Depth** | 16-bit TIFF | 32-bit FITS |
+| **Field Rotation** | CovalENS micro-dithering | Drizzle sub-pixel alignment |
+
+### The Key Difference: When Debayering Happens
+
+**Vespera's approach:** Debayers each frame first, then stacks RGB images
+- Traditional method, works well
+- Loses sub-pixel color information
+
+**Bayer Drizzle approach:** Stacks raw CFA data, debayers at the end
+- Each colored pixel "drizzles" onto the correct output channel
+- Preserves sub-pixel positioning from natural dithering
+- **Result:** ~20% sharper color detail, reduced color moiré
+
+### When to Use Each
+
+| Use Case | Recommendation |
+|----------|----------------|
+| Quick preview, social media | **Vespera TIFF** - already done! |
+| Maximum quality for print | **Siril restack** |
+| Satellites/planes in frames | **Siril** - sigma rejection removes them |
+| Dual-band filter (Ha/OIII) | **Siril** - proper channel extraction |
+| Cloudy session with bad frames | **Siril** - better rejection |
+| Multi-night without computer | **Vespera PerseverENS** |
+
+### Bottom Line
+
+The Vespera TIFF is good. Restacking with Bayer Drizzle is *better* - but the difference is subtle. For social media sharing, the Vespera output is fine. For a print you'll hang on your wall, restacking is worth the extra few minutes.
+
 ## Technical Details
 
 ### Drizzle Parameters
