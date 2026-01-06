@@ -8,10 +8,12 @@ A Python plugin for [Siril](https://siril.org/) that provides optimized preproce
 
 ## Features
 
+- **Zero Setup Required** - Reads native Vespera Pro folder structure directly, no file reorganization needed
 - **Bayer Drizzle Processing** - Optimized for alt-az field rotation
 - **Multiple Stacking Methods** - Gaussian, Square, Nearest-neighbor interpolation options
 - **Dual-Band Filter Support** - Ha/OIII extraction for SVBONY SV220 and similar filters
 - **Automatic Dark Calibration** - Hot pixel removal and cosmetic correction
+- **Auto-Detects Darks/Lights** - Identifies calibration frames by filename pattern
 - **Sky Quality Presets** - Optimized sigma rejection for different Bortle levels
 - **32-bit Linear Output** - Maximum precision for post-processing
 - **VeraLux Compatible** - ICC profile removal for clean handoff
@@ -51,20 +53,35 @@ Copy Vespera_Pro_Drizzle.py to:
 
 ## Usage
 
-### Folder Structure
+### Folder Structure - No Reorganization Needed!
 
-Organize your data in this structure:
+The plugin **automatically detects** how your Vespera Pro exported the data. Just point it at your observation folder - no need to reorganize files.
+
+**Supported structures:**
 
 ```
+# Native Vespera export (flat structure) - works automatically!
 observation_folder/
-├── darks/           # 1+ dark frames (FITS)
-└── lights/          # Light frames (FITS)
+├── light_000001.fit
+├── light_000002.fit
+├── ...
+└── dark_000001.fit
+
+# Organized structure - also works!
+observation_folder/
+├── darks/
+│   └── dark_000001.fit
+└── lights/
+    ├── light_000001.fit
+    └── light_000002.fit
 ```
+
+The plugin auto-detects darks vs lights by filename pattern.
 
 ### Running the Plugin
 
 1. Open Siril
-2. Navigate to your observation folder
+2. Navigate to your Vespera observation folder (as exported)
 3. Go to **Scripts** menu → **Vespera_Pro_Drizzle**
 4. Configure options in the GUI:
    - **Filter**: Select your filter type
