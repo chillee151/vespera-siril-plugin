@@ -141,7 +141,7 @@ QFrame#Separator { background-color: #444444; }
 
 
 class VesperaPlateSolver:
-    """Advanced plate solving for Vespera Pro with astrometry.net integration."""
+    """Plate solving for Vespera Pro"""
 
     def __init__(self, siril_interface, filename=None):
         self.siril = siril_interface
@@ -335,6 +335,46 @@ class PrepWorker(QThread):
         except Exception as e:
             self.finished.emit(False, str(e))
 
+    def _run_background_extraction(self):
+        """Run background extraction based on selected method."""
+        method = self.options['bge_method']
+
+        if method == 'graxpert':
+            smoothing = self.options['bge_smoothing']
+            # Call GraXpert-AI.py via pyscript
+            self.siril.cmd("pyscript", "GraXpert-AI.py",
+                          "-bge", f"-smoothing={smoothing}")
+        elif method == 'siril_rbf':
+            # Use Siril's built-in RBF background extraction
+            self.siril.cmd("subsky", "-rbf", "-samples=20",
+                          "-tolerance=1.0", "-smooth=0.5")
+
+    def _run_plate_solve(self):
+        """Run plate solving with DSO identification and coordinate lookup."""
+        try:
+            filename = self._get_current_filename()
+            plate_solver = VesperaPlateSolver(self.siril, filename)
+
+            # Use manual DSO name if provided
+            if self.manual_dso_name and plate_solver._validate_dso_name(self.manual_dso_name):
+                plate_solver.dso_name = self.manual_dso_name
+
+            # Get coordinates from SIMBAD
+            self._get_simbad_coordinates(plate_solver)
+            
+            if not plate_solver.applied_coordinates:
+                self.siril.log("Cannot plate solve without valid coordinates", LogColor.SALMON)
+                return False
+            
+            success = plate_solver.accurate_plate_solve()
+            self.siril.log("Plate solving completed successfully!" if success else "Plate solving failed", 
+                          LogColor.GREEN if success else LogColor.SALMON)
+            return success
+
+        except Exception as e:
+            self.siril.log(f"Plate solving error: {e}", LogColor.RED)
+            return False
+
     def _wait_for_manual_dso_entry(self):
         """Wait for manual DSO entry from the main thread."""
         try:
@@ -343,7 +383,7 @@ class PrepWorker(QThread):
             
             # Return the provided DSO name (or None if timeout/cancelled)
             return self.provided_dso_name
-                 
+                         
         except Exception as e:
             self.siril.log(f"Waiting for manual DSO entry failed: {e}", LogColor.SALMON)
             return None
@@ -470,7 +510,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.plate_solve_cb = QCheckBox("Plate Solve")
         self.plate_solve_cb.setChecked(True)
         self.plate_solve_cb.setToolTip(
-            "Attempt plate solving based on file name.\n"
+            "Plate solving based on file name.\n"
             "Manual entry fallback option.\n"
             "Processing continues even if plate solving fails."
         )
