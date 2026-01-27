@@ -141,13 +141,13 @@ QFrame#Separator { background-color: #444444; }
 
 
 class VesperaPlateSolver:
-    """Plate solving for Vespera Pro"""
+    """Advanced plate solving for Vespera Pro with astrometry.net integration."""
 
     def __init__(self, siril_interface, filename=None):
         self.siril = siril_interface
         self.filename = filename
         self.dso_name = None
-        self.applied_coordinates = None
+        self.applied_coordinates = None  # type: Optional[Tuple[str, str]]
         self.focal_length_mm = 249.47
         self.pixel_size_um = 2.00
 
@@ -156,7 +156,7 @@ class VesperaPlateSolver:
             self._extract_dso_name()
 
     def _extract_dso_name(self):
-        """Extract and validate DSO name from filename."""
+        """Extract DSO name from filename."""
         try:
             import os
 
@@ -171,44 +171,108 @@ class VesperaPlateSolver:
             else:
                 dso_name = filename_without_ext.strip()
 
-            # Validate the DSO name
-            if not dso_name or not dso_name.strip():
-                self.dso_name = None
-                return
-
-            # Check if DSO name contains only valid characters
-            valid_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -')
-            if all(c in valid_chars for c in dso_name):
+            # Validate the extracted DSO name
+            if self._validate_dso_name(dso_name):
                 self.dso_name = dso_name
             else:
                 self.dso_name = None
 
         except Exception as e:
             self.siril.log(f"DSO extraction error: {e}", LogColor.SALMON)
-            self.dso_name = None
 
-    def siril_plate_solve(self):
-        """Execute plate solving with siril command."""
+    def _validate_dso_name(self, dso_name):
+        """Validate extracted DSO name."""
+        if not dso_name or len(dso_name.strip()) == 0:
+            self.siril.log(f"Validation failed: DSO name is empty or None", LogColor.SALMON)
+            return False
+
+        # Check if DSO name contains valid characters
+        valid_chars = set('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 -')
+        if not all(c in valid_chars for c in dso_name):
+            invalid_chars = [c for c in dso_name if c not in valid_chars]
+            self.siril.log(f"Validation failed: Invalid characters '{invalid_chars}' in '{dso_name}'", LogColor.SALMON)
+            return False
+
+        return True
+
+    def accurate_plate_solve(self):
+        """Execute plate solving with accuracy priority."""
         try:
-            command = "platesolve"
-            
+            command_parts = ["platesolve"]
+
             if self.applied_coordinates:
                 ra, dec = self.applied_coordinates
-                command += f' "{ra}, {dec}"'
+                formatted_coords = self._format_coordinates_for_platesolve(
+                    ra, dec
+                )
+                command_parts.append(formatted_coords)
 
-            command += f" -focal={self.focal_length_mm} -pixelsize={self.pixel_size_um}"
-            
-            self.siril.cmd(command)
+            command_parts.extend([
+                f"-focal={self.focal_length_mm}",
+                f"-pixelsize={self.pixel_size_um}"
+            ])
+
+            full_command = " ".join(command_parts)
+            self.siril.cmd(full_command)
+
             return True
 
         except Exception as e:
             self.siril.log(f"Plate solve error: {e}", LogColor.SALMON)
             return False
 
+    def _format_coordinates_for_platesolve(self, ra, dec):
+        """Convert RA/DEC from SIMBAD format to platesolve format."""
+        try:
+            ra_clean = ra.replace('h', ':').replace('m', ':').replace('s', '')
+            if ra_clean.endswith(':'):
+                ra_clean = ra_clean[:-1]
 
+            dec_clean = dec.replace('d', ':').replace('m', ':').replace('s', '')
+            if dec_clean.endswith(':'):
+                dec_clean = dec_clean[:-1]
+
+            ra_clean = self._ensure_ra_format(ra_clean)
+            dec_clean = self._ensure_dec_format(dec_clean)
+
+            return f'"{ra_clean}, {dec_clean}"'
+
+        except Exception as e:
+            self.siril.log(f"Coordinate formatting error: {e}", LogColor.SALMON)
+            return f'"{ra}, {dec}"'
+
+    def _ensure_ra_format(self, ra):
+        """Ensure RA is in HH:MM:SS format with proper padding."""
+        parts = ra.split(':')
+        if len(parts) == 3:
+            h, m, s = parts
+            return f"{h.zfill(2)}:{m.zfill(2)}:{s.zfill(2)}"
+        elif len(parts) == 2:
+            h, m = parts
+            return f"{h.zfill(2)}:{m.zfill(2)}:00"
+        else:
+            return ra
+
+    def _ensure_dec_format(self, dec):
+        """Ensure DEC is in ±DD:MM:SS format with proper padding and sign."""
+        if dec.startswith('-') or dec.startswith('+'):
+            sign = dec[0]
+            parts = dec[1:].split(':')
+        else:
+            sign = '+'
+            parts = dec.split(':')
+
+        if len(parts) == 3:
+            d, m, s = parts
+            return f"{sign}{d.zfill(2)}:{m.zfill(2)}:{s.zfill(2)}"
+        elif len(parts) == 2:
+            d, m = parts
+            return f"{sign}{d.zfill(2)}:{m.zfill(2)}:00"
+        else:
+            return dec if dec.startswith(('+', '-')) else '+' + dec
 
     def _query_simbad_coordinates(self, dso_name):
-        """Query SIMBAD database to get RA/DEC coordinates."""
+        """Query SIMBAD database using proper URL API to get RA/DEC coordinates."""
         import urllib.parse
         import urllib.request
 
@@ -242,11 +306,11 @@ class VesperaPlateSolver:
                         coord_parts = coord_part.split()
                         if len(coord_parts) >= 3:
                             ra_h, ra_m, ra_s = coord_parts[0], coord_parts[1], coord_parts[2]
-                            ra = f"{ra_h}:{ra_m}:{ra_s}"
-                            
+                            ra = f"{ra_h}h{ra_m}m{ra_s}s"
+
                             dec_d, dec_m = coord_parts[3], coord_parts[4]
                             dec_s = coord_parts[5] if len(coord_parts) > 5 else "0"
-                            dec = f"{dec_d}:{dec_m}:{dec_s}"
+                            dec = f"{dec_d}d{dec_m}m{dec_s}s"
 
                 if ra and dec:
                     self.siril.log(f"SIMBAD coordinates found: RA={ra}, DEC={dec}", LogColor.GREEN)
@@ -277,14 +341,7 @@ class PrepWorker(QThread):
 
     def run(self):
         try:
-            # Count total processing steps
-            total_steps = (
-                1 if self.options['bge_method'] != 'none' else 0 +
-                1 if self.options['plate_solve'] else 0 +
-                1 if self.options['pcc'] else 0 +
-                1 if self.options['denoise_method'] != 'none' else 0
-            )
-            total_steps = max(total_steps, 1)
+            total_steps = self._count_steps()
             current_step = 0
 
             # Step 1: Background Extraction
@@ -310,8 +367,7 @@ class PrepWorker(QThread):
                 current_step += 1
                 pct = int(current_step / total_steps * 100)
                 self.progress.emit(pct, "Color calibrating...")
-                self.siril.log("Running Photometric Color Calibration...", LogColor.BLUE)
-                self.siril.cmd("pcc", "-limitmag=12")
+                self._run_pcc()
             elif self.options['pcc'] and not plate_solve_success:
                 self.siril.log("Skipping PCC - requires plate solved image", LogColor.SALMON)
 
@@ -320,20 +376,26 @@ class PrepWorker(QThread):
                 current_step += 1
                 pct = int(current_step / total_steps * 100)
                 self.progress.emit(pct, f"Denoising ({self.options['denoise_method']})...")
-                
-                method = self.options['denoise_method']
-                if method == 'silentium':
-                    self.siril.cmd("pyscript", "VeraLux_Silentium.py")
-                elif method == 'graxpert':
-                    self.siril.cmd("pyscript", "GraXpert-AI.py", "-denoise", f"-strength={self.options.get('denoise_strength', 0.5)}")
-                elif method == 'cosmic':
-                    self.siril.cmd("pyscript", "CosmicClarity_Denoise.py")
+                self._run_denoise()
 
             self.progress.emit(100, "Complete!")
             self.finished.emit(True, "Image prepared successfully!")
 
         except Exception as e:
             self.finished.emit(False, str(e))
+
+    def _count_steps(self):
+        """Count total processing steps."""
+        steps = 0
+        if self.options['bge_method'] != 'none':
+            steps += 1
+        if self.options['plate_solve']:
+            steps += 1
+        if self.options['pcc']:
+            steps += 1
+        if self.options['denoise_method'] != 'none':
+            steps += 1
+        return max(steps, 1)
 
     def _run_background_extraction(self):
         """Run background extraction based on selected method."""
@@ -374,6 +436,49 @@ class PrepWorker(QThread):
         except Exception as e:
             self.siril.log(f"Plate solving error: {e}", LogColor.RED)
             return False
+    
+    def _get_simbad_coordinates(self, plate_solver):
+        """Get coordinates from SIMBAD with manual fallback."""
+        simbad_coords = None
+        if plate_solver.dso_name and plate_solver._validate_dso_name(plate_solver.dso_name):
+            simbad_coords = plate_solver._query_simbad_coordinates(plate_solver.dso_name)
+            if simbad_coords:
+                plate_solver.applied_coordinates = simbad_coords
+            else:
+                self._request_manual_dso_entry(plate_solver)
+        elif not plate_solver.dso_name:
+            self._request_manual_dso_entry(plate_solver)
+    
+    def _request_manual_dso_entry(self, plate_solver):
+        """Request manual DSO entry when automatic extraction fails."""
+        self.simbad_query_failed = True
+        self.update_dso_input_visibility.emit()
+        self.manual_dso_request.emit()
+        
+        manual_dso = self._wait_for_manual_dso_entry()
+        if manual_dso and plate_solver._validate_dso_name(manual_dso):
+            plate_solver.dso_name = manual_dso
+            simbad_coords = plate_solver._query_simbad_coordinates(plate_solver.dso_name)
+            if simbad_coords:
+                plate_solver.applied_coordinates = simbad_coords
+
+    def _log_plate_solve_parameters(self, plate_solver, simbad_coords=None):
+        """Log plate solve parameters."""
+        if not plate_solver:
+            return
+
+        command_parts = ["platesolve"]
+
+        if simbad_coords:
+            ra, dec = simbad_coords
+            ra_platesolve = ra.replace('h', ':').replace('m', ':').replace('s', '').rstrip(':')
+            dec_platesolve = dec.replace('d', ':').replace('m', ':').replace('s', '').rstrip(':')
+            command_parts.append(f'"{ra_platesolve}, {dec_platesolve}"')
+
+        command_parts.extend([
+            f"-focal={plate_solver.focal_length_mm}",
+            f"-pixelsize={plate_solver.pixel_size_um}"
+        ])
 
     def _wait_for_manual_dso_entry(self):
         """Wait for manual DSO entry from the main thread."""
@@ -383,10 +488,36 @@ class PrepWorker(QThread):
             
             # Return the provided DSO name (or None if timeout/cancelled)
             return self.provided_dso_name
-                         
+                 
         except Exception as e:
             self.siril.log(f"Waiting for manual DSO entry failed: {e}", LogColor.SALMON)
             return None
+
+    def _get_current_filename(self):
+        """Get current image filename."""
+        try:
+            return self.siril.get_image_filename()
+        except Exception:
+            return None
+
+    def _run_pcc(self):
+        """Run photometric color calibration."""
+        self.siril.log("Running Photometric Color Calibration...", LogColor.BLUE)
+        self.siril.cmd("pcc", "-limitmag=12")
+
+    def _run_denoise(self):
+        """Run denoising based on selected method."""
+        method = self.options['denoise_method']
+        
+        denoise_commands = {
+            'silentium': ("pyscript", "VeraLux_Silentium.py"),
+            'graxpert': ("pyscript", "GraXpert-AI.py", "-denoise", f"-strength={self.options.get('denoise_strength', 0.5)}"),
+            'cosmic': ("pyscript", "CosmicClarity_Denoise.py")
+        }
+        
+        if method in denoise_commands:
+            self.siril.cmd(*denoise_commands[method])
+
 
 class VesperaQuickPrepWindow(QMainWindow):
     """Main window for Vespera Quick Prep plugin."""
@@ -403,25 +534,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.setStyleSheet(DARK_STYLESHEET)
 
         self._build_ui()
-        
-        # Load saved settings
-        bge = self.settings.value("bge_method", 0, type=int)
-        self.bge_button_group.button(bge).setChecked(True)
-
-        smoothing = self.settings.value("smoothing", 50, type=int)
-        self.smoothing_slider.setValue(smoothing)
-
-        self.plate_solve_cb.setChecked(
-            self.settings.value("plate_solve", True, type=bool))
-        self.pcc_cb.setChecked(
-            self.settings.value("pcc", True, type=bool))
-
-        denoise = self.settings.value("denoise_method", 0, type=int)
-        self.denoise_button_group.button(denoise).setChecked(True)
-
-        self.launch_hms_cb.setChecked(
-            self.settings.value("launch_hms", True, type=bool))
-        
+        self._load_settings()
         self._update_dso_input_visibility()  # Initialize visibility
 
     def _build_ui(self):
@@ -510,8 +623,8 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.plate_solve_cb = QCheckBox("Plate Solve")
         self.plate_solve_cb.setChecked(True)
         self.plate_solve_cb.setToolTip(
-            "Plate solving based on file name.\n"
-            "Manual entry fallback option.\n"
+            "Attempt blind plate solving (no target coordinates needed).\n"
+            "Uses multiple strategies with fallback options.\n"
             "Processing continues even if plate solving fails."
         )
         cal_layout.addWidget(self.plate_solve_cb)
@@ -521,7 +634,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.dso_input.setPlaceholderText("Enter DSO name (e.g., M42, IC 342)")
         self.dso_input.setToolTip(
             "Manually enter DSO name for plate solving if automatic extraction fails.\n"
-            "Examples: M42, IC 342, NGC 7000"
+            "Examples: M42, IC 342, NGC 7000, M31"
         )
         self.dso_input.setVisible(False)  # Only show when needed
         cal_layout.addWidget(self.dso_input)
@@ -533,10 +646,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.pcc_cb.setChecked(True)
         
         # Force plate solve when PCC is enabled (PCC requires plate solving)
-        self.pcc_cb.stateChanged.connect(lambda state: (
-            self.plate_solve_cb.setChecked(True) if state == Qt.CheckState.Checked.value and not self.plate_solve_cb.isChecked() else None,
-            self.siril.log("Plate solving enabled (required for PCC)", LogColor.BLUE) if state == Qt.CheckState.Checked.value and not self.plate_solve_cb.isChecked() else None
-        )[0])
+        self.pcc_cb.stateChanged.connect(self._on_pcc_state_changed)
         self.pcc_cb.setToolTip(
             "Calibrate colors using Gaia star catalog.\n"
             "Produces accurate, natural star colors."
@@ -617,22 +727,92 @@ class VesperaQuickPrepWindow(QMainWindow):
         footer.setStyleSheet("color: #555555; font-size: 8pt;")
         layout.addWidget(footer)
 
+    def _load_settings(self):
+        """Load saved settings."""
+        bge = self.settings.value("bge_method", 0, type=int)
+        self.bge_button_group.button(bge).setChecked(True)
+
+        smoothing = self.settings.value("smoothing", 50, type=int)
+        self.smoothing_slider.setValue(smoothing)
+
+        self.plate_solve_cb.setChecked(
+            self.settings.value("plate_solve", True, type=bool))
+        self.pcc_cb.setChecked(
+            self.settings.value("pcc", True, type=bool))
+
+        denoise = self.settings.value("denoise_method", 0, type=int)
+        self.denoise_button_group.button(denoise).setChecked(True)
+
+        self.launch_hms_cb.setChecked(
+            self.settings.value("launch_hms", True, type=bool))
+
+    def _save_settings(self):
+        """Save current settings."""
+        self.settings.setValue("bge_method", self.bge_button_group.checkedId())
+        self.settings.setValue("smoothing", self.smoothing_slider.value())
+        self.settings.setValue("plate_solve", self.plate_solve_cb.isChecked())
+        self.settings.setValue("pcc", self.pcc_cb.isChecked())
+        self.settings.setValue("denoise_method", self.denoise_button_group.checkedId())
+        self.settings.setValue("launch_hms", self.launch_hms_cb.isChecked())
+
+    def _get_options(self):
+        """Collect current options into a dictionary."""
+        bge_id = self.bge_button_group.checkedId()
+        bge_methods = {0: 'graxpert', 1: 'siril_rbf', 2: 'none'}
+
+        denoise_id = self.denoise_button_group.checkedId()
+        denoise_methods = {0: 'none', 1: 'silentium', 2: 'graxpert', 3: 'cosmic'}
+
+        return {
+            'bge_method': bge_methods.get(bge_id, 'graxpert'),
+            'bge_smoothing': self.smoothing_slider.value() / 100.0,
+            'plate_solve': self.plate_solve_cb.isChecked(),
+            'pcc': self.pcc_cb.isChecked(),
+            'denoise_method': denoise_methods.get(denoise_id, 'none'),
+            'denoise_strength': 0.5,
+            'launch_hms': self.launch_hms_cb.isChecked(),
+            'optimize_format': True,  # Enable format optimization by default
+            'continue_on_failure': True  # Continue processing even if plate solving fails
+        }
+
+    def _on_pcc_state_changed(self, state):
+        """Enable plate solving when PCC is enabled."""
+        if state == Qt.CheckState.Checked.value and not self.plate_solve_cb.isChecked():
+            self.plate_solve_cb.setChecked(True)
+            self.siril.log("Plate solving enabled (required for PCC)", LogColor.BLUE)
+
     def _update_dso_input_visibility(self):
         """Show DSO input when needed for plate solving."""
-        try:
-            current_filename = self.siril.get_image_filename()
-            current_filename = current_filename if current_filename and len(current_filename.strip()) > 0 else None
-        except Exception:
-            current_filename = None
-        
         show_input = (self.plate_solve_cb.isChecked() and
-                      (not current_filename or 
+                      (not self._has_valid_filename() or 
                        getattr(self, 'simbad_query_failed', False)))
         
         self.dso_input.setVisible(show_input)
         
         if show_input:
             self.siril.log("Please enter DSO name for plate solving", LogColor.BLUE)
+
+    def _has_valid_dso_name(self):
+        """Check if we have a valid extracted DSO name."""
+        # Check if plate solver exists and has a valid DSO name
+        if hasattr(self, 'plate_solver') and self.plate_solver and self.plate_solver.dso_name:
+            return len(self.plate_solver.dso_name.strip()) > 0
+        return False
+
+    def _has_valid_filename(self):
+        """Check if we have a valid filename for extraction."""
+        try:
+            filename = self._get_current_filename()
+            return filename is not None and len(filename.strip()) > 0
+        except:
+            return False
+
+    def _get_current_filename(self):
+        """Get current image filename."""
+        try:
+            return self.siril.get_image_filename()
+        except Exception:
+            return None
 
     def _on_prep_clicked(self):
         """Handle Prep button click."""
@@ -648,29 +828,8 @@ class VesperaQuickPrepWindow(QMainWindow):
                 "Please load a Vespera TIFF image first.")
             return
 
-        # Save current settings
-        self.settings.setValue("bge_method", self.bge_button_group.checkedId())
-        self.settings.setValue("smoothing", self.smoothing_slider.value())
-        self.settings.setValue("plate_solve", self.plate_solve_cb.isChecked())
-        self.settings.setValue("pcc", self.pcc_cb.isChecked())
-        self.settings.setValue("denoise_method", self.denoise_button_group.checkedId())
-        self.settings.setValue("launch_hms", self.launch_hms_cb.isChecked())
-        
-        # Collect current options
-        bge_methods = ['graxpert', 'siril_rbf', 'none']
-        denoise_methods = ['none', 'silentium', 'graxpert', 'cosmic']
-        
-        options = {
-            'bge_method': bge_methods[self.bge_button_group.checkedId()],
-            'bge_smoothing': self.smoothing_slider.value() / 100.0,
-            'plate_solve': self.plate_solve_cb.isChecked(),
-            'pcc': self.pcc_cb.isChecked(),
-            'denoise_method': denoise_methods[self.denoise_button_group.checkedId()],
-            'denoise_strength': 0.5,
-            'launch_hms': self.launch_hms_cb.isChecked(),
-            'optimize_format': True,
-            'continue_on_failure': True
-        }
+        self._save_settings()
+        options = self._get_options()
 
         # Validate at least one operation selected
         if (options['bge_method'] == 'none' and
@@ -689,24 +848,16 @@ class VesperaQuickPrepWindow(QMainWindow):
         # Start worker thread
         dso_name = self.dso_input.text().strip() if self.dso_input.isVisible() else None
         self.worker = PrepWorker(self.siril, options, dso_name)
-        self.worker.progress.connect(lambda percent, message: (
-            self.progress_bar.setValue(percent),
-            self.status_label.setText(message)
-        ))
-        self.worker.finished.connect(lambda success, message: (
-            self.prep_button.setEnabled(True),
-            self.progress_bar.setVisible(False),
-            (self.status_label.setText(message), self.status_label.setStyleSheet("color: #88ff88;")) if success else (
-                self.status_label.setText(f"Error: {message}"),
-                self.status_label.setStyleSheet("color: #ff8888;"),
-                QMessageBox.critical(self, "Error", message)
-            ),
-            self.siril.cmd("pyscript", "VeraLux_HyperMetric_Stretch.py") if success and self.launch_hms_cb.isChecked() else None,
-            self.close() if success and self.launch_hms_cb.isChecked() else None
-        ))
+        self.worker.progress.connect(self._on_progress)
+        self.worker.finished.connect(self._on_finished)
         self.worker.manual_dso_request.connect(self._on_manual_dso_request)
         self.worker.update_dso_input_visibility.connect(self._update_dso_input_visibility)
         self.worker.start()
+
+    def _on_progress(self, percent, message):
+        """Handle progress updates."""
+        self.progress_bar.setValue(percent)
+        self.status_label.setText(message)
 
     def _on_manual_dso_request(self):
         """Handle manual DSO request from worker thread."""
@@ -765,29 +916,27 @@ class VesperaQuickPrepWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Handle window close."""
-        # Save current settings
-        self.settings.setValue("bge_method", self.bge_button_group.checkedId())
-        self.settings.setValue("smoothing", self.smoothing_slider.value())
-        self.settings.setValue("plate_solve", self.plate_solve_cb.isChecked())
-        self.settings.setValue("pcc", self.pcc_cb.isChecked())
-        self.settings.setValue("denoise_method", self.denoise_button_group.checkedId())
-        self.settings.setValue("launch_hms", self.launch_hms_cb.isChecked())
-        
+        self._save_settings()
         event.accept()
 
 
 def main():
     """Main entry point."""
     siril = SirilInterface()
-    app = QApplication.instance() or QApplication(sys.argv)
 
     try:
         siril.connect()
         siril.log("Vespera Quick Prep started", LogColor.GREEN)
-        
+
+        app = QApplication.instance()
+        if app is None:
+            app = QApplication(sys.argv)
+
         window = VesperaQuickPrepWindow(siril)
         window.show()
+
         app.exec()
+
     except Exception as e:
         siril.log(f"Error: {e}", LogColor.RED)
         raise

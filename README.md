@@ -109,19 +109,22 @@ The plugin **automatically detects** how your Vespera Pro exported the data. Jus
 
 ```
 # Native Vespera export (flat structure) - works automatically!
-observation_folder/
-├── light_000001.fit
-├── light_000002.fit
-├── ...
-└── dark_000001.fit
+Vespera_Observation_Folder/
+├── img-0001-dark.fits    (Dark frame)
+├── 01-images-initial/
+│   ├── img-0001.fits     (Light frame 1)
+│   ├── img-0002.fits     (Light frame 2)
+│   └── ...               (Additional light frames)
+└── [Other Vespera files like TIFFs, JSON metadata, etc.]
+
 
 # Organized structure - also works!
 observation_folder/
 ├── darks/
-│   └── dark_000001.fit
+│   └── dark_000001.fit   (Dark frame)
 └── lights/
-    ├── light_000001.fit
-    └── light_000002.fit
+    ├── light_000001.fit  (Light frame 1)
+    └── light_000002.fit  (Light frame 2)
 ```
 
 The plugin auto-detects darks vs lights by filename pattern.
