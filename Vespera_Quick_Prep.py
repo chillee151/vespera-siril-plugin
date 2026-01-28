@@ -10,14 +10,14 @@
 """
 Overview
 --------
-A streamlined preparation plugin for Vespera Pro 16-bit TIFF images that
-automates the tedious pre-stretch workflow:
+A streamlined preparation plugin for Vespera Pro 16‑bit TIFF images that
+automates the tedious pre‑stretch workflow:
 
 1. Background Extraction (GraXpert AI or Siril RBF)
 2. Plate Solving (for coordinate metadata)
-3. Photometric Color Calibration (accurate star colors)
+3. Spectrophotometric Color Correction (SPCC)
 4. Optional Denoising (multiple engine choices)
-5. Optional auto-launch of VeraLux HMS for stretching
+5. Optional auto‑launch of VeraLux HMS for stretching
 
 This plugin bridges the gap between Vespera's output and the final stretch,
 eliminating repetitive manual steps while preserving full control over each stage.
@@ -28,13 +28,13 @@ Usage
 2. Open Vespera Quick Prep from Scripts menu
 3. Select your preferred options
 4. Click "Prep Image"
-5. Image is ready for stretching (or HMS auto-launches)
+5. Image is ready for stretching (or HMS auto‑launches)
 
 Requirements
 ------------
 - Siril 1.3+ with sirilpy
 - PyQt6
-- GraXpert-AI.py (for AI background extraction)
+- GraXpert‑AI.py (for AI background extraction)
 - Optional: VeraLux Silentium, Cosmic Clarity for denoise options
 """
 
@@ -55,12 +55,28 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget,
     QLabel, QPushButton, QGroupBox, QRadioButton, QButtonGroup,
     QCheckBox, QSlider, QProgressBar, QMessageBox, QFrame,
-    QLineEdit, QInputDialog
+    QLineEdit, QInputDialog, QComboBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSettings
 from PyQt6.QtGui import QFont
 
 VERSION = "1.0.1"
+
+# ---------------------
+#  CHANGE LOG
+# ---------------------
+CHANGELOG = """
+Version 1.0.1 (2026-01)
+- Added advanced plate solving with SIMBAD integration
+- Implemented manual DSO name entry fallback
+- Enhanced coordinate formatting and validation
+- Improved error handling for plate solving operations
+- Added DSO name input field with visibility control
+- Implemented SPCC
+
+Version 1.0.0 (2026-01)
+- Initial release
+"""
 
 # ---------------------
 #  DARK THEME
@@ -78,7 +94,7 @@ QGroupBox {
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 10px;
-    padding: 0 5px;
+    padding: 0 5x;
     color: #88aaff;
 }
 QLabel { color: #cccccc; }
@@ -147,7 +163,7 @@ class VesperaPlateSolver:
         self.siril = siril_interface
         self.filename = filename
         self.dso_name = None
-        self.applied_coordinates = None  # type: Optional[Tuple[str, str]]
+        self.applied_coordinates = None
         self.focal_length_mm = 249.47
         self.pixel_size_um = 2.00
 
@@ -195,7 +211,7 @@ class VesperaPlateSolver:
 
         return True
 
-    def accurate_plate_solve(self):
+    def plate_solve(self):
         """Execute plate solving with accuracy priority."""
         try:
             command_parts = ["platesolve"]
@@ -323,12 +339,12 @@ class VesperaPlateSolver:
             self.siril.log(f"SIMBAD query error: {e}", LogColor.SALMON)
             return None
 
+
 class PrepWorker(QThread):
     """Background thread for running the preparation pipeline."""
     progress = pyqtSignal(int, str)  # percent, status message
     finished = pyqtSignal(bool, str)  # success, message
     manual_dso_request = pyqtSignal()  # Request manual DSO entry
-    manual_dso_provided = pyqtSignal(str)  # Manual DSO name provided
     update_dso_input_visibility = pyqtSignal()  # Update DSO input visibility
 
     def __init__(self, siril, options, dso_name=None):
@@ -357,19 +373,19 @@ class PrepWorker(QThread):
                 current_step += 1
                 pct = int(current_step / total_steps * 100)
                 self.progress.emit(pct, "Plate solving...")
-                
+
                 plate_solve_success = self._run_plate_solve()
                 if not plate_solve_success:
                     self.siril.log("Plate solving failed, continuing with other processing...", LogColor.SALMON)
- 
-            # Step 3: Photometric Color Calibration (only if plate solving succeeded)
-            if self.options['pcc'] and plate_solve_success:
+
+            # Step 3: Spectrophotometric Color Correction (SPCC)
+            if self.options['spcc'] and plate_solve_success:
                 current_step += 1
                 pct = int(current_step / total_steps * 100)
                 self.progress.emit(pct, "Color calibrating...")
-                self._run_pcc()
-            elif self.options['pcc'] and not plate_solve_success:
-                self.siril.log("Skipping PCC - requires plate solved image", LogColor.SALMON)
+                self._run_spcc()
+            elif self.options['spcc'] and not plate_solve_success:
+                self.siril.log("Skipping color calibration - requires plate solved image", LogColor.SALMON)
 
             # Step 4: Denoise (optional)
             if self.options['denoise_method'] != 'none':
@@ -391,7 +407,7 @@ class PrepWorker(QThread):
             steps += 1
         if self.options['plate_solve']:
             steps += 1
-        if self.options['pcc']:
+        if self.options['spcc']:
             steps += 1
         if self.options['denoise_method'] != 'none':
             steps += 1
@@ -408,7 +424,7 @@ class PrepWorker(QThread):
                           "-bge", f"-smoothing={smoothing}")
         elif method == 'siril_rbf':
             # Use Siril's built-in RBF background extraction
-            self.siril.cmd("subsky", "-rbf", "-samples=20",
+            self.siril.cmd("subsky", "-rbf", "-samples=60",
                           "-tolerance=1.0", "-smooth=0.5")
 
     def _run_plate_solve(self):
@@ -423,20 +439,20 @@ class PrepWorker(QThread):
 
             # Get coordinates from SIMBAD
             self._get_simbad_coordinates(plate_solver)
-            
+
             if not plate_solver.applied_coordinates:
                 self.siril.log("Cannot plate solve without valid coordinates", LogColor.SALMON)
                 return False
-            
-            success = plate_solver.accurate_plate_solve()
-            self.siril.log("Plate solving completed successfully!" if success else "Plate solving failed", 
+
+            success = plate_solver.plate_solve()
+            self.siril.log("Plate solving completed successfully!" if success else "Plate solving failed",
                           LogColor.GREEN if success else LogColor.SALMON)
             return success
 
         except Exception as e:
             self.siril.log(f"Plate solving error: {e}", LogColor.RED)
             return False
-    
+
     def _get_simbad_coordinates(self, plate_solver):
         """Get coordinates from SIMBAD with manual fallback."""
         simbad_coords = None
@@ -444,17 +460,15 @@ class PrepWorker(QThread):
             simbad_coords = plate_solver._query_simbad_coordinates(plate_solver.dso_name)
             if simbad_coords:
                 plate_solver.applied_coordinates = simbad_coords
-            else:
-                self._request_manual_dso_entry(plate_solver)
-        elif not plate_solver.dso_name:
+        else:
+            # Request manual DSO entry from main thread
             self._request_manual_dso_entry(plate_solver)
-    
+
     def _request_manual_dso_entry(self, plate_solver):
         """Request manual DSO entry when automatic extraction fails."""
-        self.simbad_query_failed = True
         self.update_dso_input_visibility.emit()
         self.manual_dso_request.emit()
-        
+
         manual_dso = self._wait_for_manual_dso_entry()
         if manual_dso and plate_solver._validate_dso_name(manual_dso):
             plate_solver.dso_name = manual_dso
@@ -462,33 +476,14 @@ class PrepWorker(QThread):
             if simbad_coords:
                 plate_solver.applied_coordinates = simbad_coords
 
-    def _log_plate_solve_parameters(self, plate_solver, simbad_coords=None):
-        """Log plate solve parameters."""
-        if not plate_solver:
-            return
-
-        command_parts = ["platesolve"]
-
-        if simbad_coords:
-            ra, dec = simbad_coords
-            ra_platesolve = ra.replace('h', ':').replace('m', ':').replace('s', '').rstrip(':')
-            dec_platesolve = dec.replace('d', ':').replace('m', ':').replace('s', '').rstrip(':')
-            command_parts.append(f'"{ra_platesolve}, {dec_platesolve}"')
-
-        command_parts.extend([
-            f"-focal={plate_solver.focal_length_mm}",
-            f"-pixelsize={plate_solver.pixel_size_um}"
-        ])
-
     def _wait_for_manual_dso_entry(self):
         """Wait for manual DSO entry from the main thread."""
         try:
             # Wait for the main thread to provide the DSO name
             self.manual_dso_event.wait(timeout=30.0)  # 30 second timeout
-            
-            # Return the provided DSO name (or None if timeout/cancelled)
+
             return self.provided_dso_name
-                 
+
         except Exception as e:
             self.siril.log(f"Waiting for manual DSO entry failed: {e}", LogColor.SALMON)
             return None
@@ -500,28 +495,57 @@ class PrepWorker(QThread):
         except Exception:
             return None
 
-    def _run_pcc(self):
-        """Run photometric color calibration."""
-        self.siril.log("Running Photometric Color Calibration...", LogColor.BLUE)
-        self.siril.cmd("pcc", "-limitmag=12")
+    def _run_spcc(self):
+        """Run Spectrophotometric Color Correction (SPCC) on the loaded plate‑solved image."""
+        filter_name = self.options.get('spcc_filter', 'No Filter').strip()
+        self.siril.log(f"SPCC filter selected: {filter_name}", LogColor.BLUE)  # debug
+
+        spcc_sensor = "Sony IMX676"
+
+        if filter_name == "City Light Pollution":
+            # CLS filter – use oscfilter
+            cmd = f'spcc \"-oscsensor={spcc_sensor}\" \"-oscfilter=Vaonis CLS\"'
+            self.siril.log(f"Running SPCC (CLS) with command: {cmd}", LogColor.BLUE)
+            self.siril.cmd(cmd)
+
+        elif filter_name == "Dual Band Ha/Oiii":
+            # Dual‑band narrowband mode (Ha 656.3 nm, OIII 500.7 nm, 12 nm bandwidth)
+            cmd = (
+                f'spcc \"-oscsensor={spcc_sensor}\" '
+                f'\"-narrowband\" '
+                f'\"-rwl=656.3\" \"-rbw=12\" '
+                f'\"-gwl=500.7\" \"-gbw=12\"'
+            )
+            self.siril.log(f"Running SPCC (Dualband) with command: {cmd}", LogColor.BLUE)
+            self.siril.cmd(cmd)
+
+        else:  # Default / No Filter
+            cmd = (
+                f'spcc \"-oscsensor={spcc_sensor}\" '
+                f'\"-rfilter=NoFilter\" \"-gfilter=NoFilter\" \"-bfilter=NoFilter\"'
+            )
+            self.siril.log(f"Running SPCC (No Filter) with command: {cmd}", LogColor.BLUE)
+            self.siril.cmd(cmd)
+
+        return True
 
     def _run_denoise(self):
         """Run denoising based on selected method."""
         method = self.options['denoise_method']
-        
+
         denoise_commands = {
             'silentium': ("pyscript", "VeraLux_Silentium.py"),
-            'graxpert': ("pyscript", "GraXpert-AI.py", "-denoise", f"-strength={self.options.get('denoise_strength', 0.5)}"),
+            'graxpert': ("pyscript", "GraXpert-AI.py", "-denoise",
+                         f"-strength={self.options.get('denoise_strength', 0.5)}"),
             'cosmic': ("pyscript", "CosmicClarity_Denoise.py")
         }
-        
+
         if method in denoise_commands:
             self.siril.cmd(*denoise_commands[method])
 
 
 class VesperaQuickPrepWindow(QMainWindow):
     """Main window for Vespera Quick Prep plugin."""
-
     def __init__(self, siril):
         super().__init__()
         self.siril = siril
@@ -535,7 +559,6 @@ class VesperaQuickPrepWindow(QMainWindow):
 
         self._build_ui()
         self._load_settings()
-        self._update_dso_input_visibility()  # Initialize visibility
 
     def _build_ui(self):
         """Build the user interface."""
@@ -623,35 +646,43 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.plate_solve_cb = QCheckBox("Plate Solve")
         self.plate_solve_cb.setChecked(True)
         self.plate_solve_cb.setToolTip(
-            "Attempt blind plate solving (no target coordinates needed).\n"
-            "Uses multiple strategies with fallback options.\n"
+            "Attempt plate solving based on file name.\n"
+            "DSO name manual entry fallback options.\n"
             "Processing continues even if plate solving fails."
         )
         cal_layout.addWidget(self.plate_solve_cb)
 
         # Add DSO name input field
         self.dso_input = QLineEdit()
-        self.dso_input.setPlaceholderText("Enter DSO name (e.g., M42, IC 342)")
+        self.dso_input.setPlaceholderText("Enter DSO name")
         self.dso_input.setToolTip(
             "Manually enter DSO name for plate solving if automatic extraction fails.\n"
-            "Examples: M42, IC 342, NGC 7000, M31"
+            "Examples: M42, IC 342, NGC 7000"
         )
         self.dso_input.setVisible(False)  # Only show when needed
         cal_layout.addWidget(self.dso_input)
 
-        # Connect plate solve checkbox to visibility control
         self.plate_solve_cb.stateChanged.connect(self._update_dso_input_visibility)
 
-        self.pcc_cb = QCheckBox("Photometric Color Calibration (PCC)")
-        self.pcc_cb.setChecked(True)
-        
-        # Force plate solve when PCC is enabled (PCC requires plate solving)
-        self.pcc_cb.stateChanged.connect(self._on_pcc_state_changed)
-        self.pcc_cb.setToolTip(
+        # SPCC checkbox
+        self.spcc_cb = QCheckBox("Spectrophotometric Color Correction (SPCC)")
+        self.spcc_cb.setChecked(True)
+
+        # Force plate solving when SPCC is enabled (SPCC requires plate solving)
+        self.spcc_cb.stateChanged.connect(self._on_spcc_state_changed)   # ← updated signal
+        self.spcc_cb.toggled.connect(self._update_spcc_filter_visibility)
+        self.spcc_cb.setToolTip(
             "Calibrate colors using Gaia star catalog.\n"
             "Produces accurate, natural star colors."
         )
-        cal_layout.addWidget(self.pcc_cb)
+        cal_layout.addWidget(self.spcc_cb)
+
+        self.spcc_filter_combo = QComboBox()
+        self.spcc_filter_combo.addItems(
+            ["No Filter", "Dual Band Ha/Oiii", "City Light Pollution"]
+        )
+        self.spcc_filter_combo.setCurrentIndex(0)
+        cal_layout.addWidget(self.spcc_filter_combo)
 
         layout.addWidget(cal_group)
 
@@ -678,7 +709,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.denoise_graxpert = QRadioButton("GraXpert AI")
         self.denoise_graxpert.setToolTip(
             "AI neural network denoiser.\n"
-            "Good general-purpose option.\n"
+            "Good general‑purpose option.\n"
             "May occasionally add artifacts."
         )
         self.denoise_button_group.addButton(self.denoise_graxpert, 2)
@@ -737,8 +768,8 @@ class VesperaQuickPrepWindow(QMainWindow):
 
         self.plate_solve_cb.setChecked(
             self.settings.value("plate_solve", True, type=bool))
-        self.pcc_cb.setChecked(
-            self.settings.value("pcc", True, type=bool))
+        self.spcc_cb.setChecked(
+            self.settings.value("spcc", True, type=bool))
 
         denoise = self.settings.value("denoise_method", 0, type=int)
         self.denoise_button_group.button(denoise).setChecked(True)
@@ -746,14 +777,20 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.launch_hms_cb.setChecked(
             self.settings.value("launch_hms", True, type=bool))
 
+        self.spcc_filter_combo.setCurrentIndex(
+            self.settings.value("spcc_filter_index", 0, type=int))
+
     def _save_settings(self):
         """Save current settings."""
         self.settings.setValue("bge_method", self.bge_button_group.checkedId())
         self.settings.setValue("smoothing", self.smoothing_slider.value())
         self.settings.setValue("plate_solve", self.plate_solve_cb.isChecked())
-        self.settings.setValue("pcc", self.pcc_cb.isChecked())
+        self.settings.setValue("spcc", self.spcc_cb.isChecked())
         self.settings.setValue("denoise_method", self.denoise_button_group.checkedId())
         self.settings.setValue("launch_hms", self.launch_hms_cb.isChecked())
+
+        self.settings.setValue("spcc_filter_index",
+                               self.spcc_filter_combo.currentIndex())
 
     def _get_options(self):
         """Collect current options into a dictionary."""
@@ -767,28 +804,46 @@ class VesperaQuickPrepWindow(QMainWindow):
             'bge_method': bge_methods.get(bge_id, 'graxpert'),
             'bge_smoothing': self.smoothing_slider.value() / 100.0,
             'plate_solve': self.plate_solve_cb.isChecked(),
-            'pcc': self.pcc_cb.isChecked(),
+            'spcc': self.spcc_cb.isChecked(),
+            'spcc_filter': self.spcc_filter_combo.currentText(),
             'denoise_method': denoise_methods.get(denoise_id, 'none'),
             'denoise_strength': 0.5,
             'launch_hms': self.launch_hms_cb.isChecked(),
-            'optimize_format': True,  # Enable format optimization by default
-            'continue_on_failure': True  # Continue processing even if plate solving fails
+            'optimize_format': True,
+            'continue_on_failure': True
         }
 
-    def _on_pcc_state_changed(self, state):
-        """Enable plate solving when PCC is enabled."""
-        if state == Qt.CheckState.Checked.value and not self.plate_solve_cb.isChecked():
-            self.plate_solve_cb.setChecked(True)
-            self.siril.log("Plate solving enabled (required for PCC)", LogColor.BLUE)
+    def _on_spcc_state_changed(self, state: int):
+        """Enable plate solving when SPCC is enabled; disable it if SPCC is turned off."""
+        # Existing behaviour: enable plate solving when SPCC checked
+        if state == Qt.CheckState.Checked.value:
+            if not self.plate_solve_cb.isChecked():
+                self.plate_solve_cb.setChecked(True)
+                self.siril.log("Plate solving enabled (required for SPCC)", LogColor.BLUE)
+
+        # New behaviour: disable plate solving when SPCC unchecked
+        else:
+            if self.plate_solve_cb.isChecked():
+                self.plate_solve_cb.setChecked(False)
+                self.siril.log("Plate solving disabled because SPCC was turned off", LogColor.BLUE)
+
+    def _update_spcc_filter_visibility(self, checked: bool | None = None):
+        """
+        Show the filter combo when SPCC is enabled.
+        If *checked* is None, use the current checkbox state.
+        """
+        if checked is None:
+            checked = self.spcc_cb.isChecked()
+        self.spcc_filter_combo.setVisible(checked)
 
     def _update_dso_input_visibility(self):
         """Show DSO input when needed for plate solving."""
         show_input = (self.plate_solve_cb.isChecked() and
                       (not self._has_valid_filename() or 
                        getattr(self, 'simbad_query_failed', False)))
-        
+
         self.dso_input.setVisible(show_input)
-        
+
         if show_input:
             self.siril.log("Please enter DSO name for plate solving", LogColor.BLUE)
 
@@ -834,7 +889,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         # Validate at least one operation selected
         if (options['bge_method'] == 'none' and
             not options['plate_solve'] and
-            not options['pcc'] and
+            not options['spcc'] and
             options['denoise_method'] == 'none'):
             QMessageBox.information(self, "Nothing to do",
                 "Please select at least one operation.")
@@ -866,11 +921,11 @@ class VesperaQuickPrepWindow(QMainWindow):
             dso_name, ok = QInputDialog.getText(
                 self,
                 "Manual DSO Entry Required",
-                "SIMBAD query failed. Please enter DSO name (e.g., M42, IC 342):",
+                "SIMBAD query failed. Please enter DSO name:",
                 QLineEdit.EchoMode.Normal,
                 ""
             )
-            
+
             if ok and dso_name.strip():
                 self.siril.log(f"Using manual DSO entry: {dso_name}", LogColor.BLUE)
                 # Store the manual DSO name and signal the worker
@@ -881,7 +936,7 @@ class VesperaQuickPrepWindow(QMainWindow):
                 # Signal the worker that no DSO name was provided
                 if self.worker:
                     self.worker.provided_dso_name = None
-                
+
             # Always signal the worker to continue
             if self.worker:
                 self.worker.manual_dso_event.set()
@@ -936,7 +991,6 @@ def main():
         window.show()
 
         app.exec()
-
     except Exception as e:
         siril.log(f"Error: {e}", LogColor.RED)
         raise
