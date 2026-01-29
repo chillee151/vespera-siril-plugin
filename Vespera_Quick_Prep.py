@@ -73,6 +73,7 @@ Version 1.0.1 (2026-01)
 - Improved error handling for plate solving operations
 - Added DSO name input field with visibility control
 - Implemented SPCC
+- Vespera II and Vespera Pro support
 
 Version 1.0.0 (2026-01)
 - Initial release
@@ -137,7 +138,6 @@ QPushButton {
     font-weight: bold;
 }
 QPushButton:hover { background-color: #555555; border-color: #777777; }
-QPushButton:disabled { background-color: #333333; color: #666666; }
 QPushButton#PrepButton {
     background-color: #285299;
     border: 1px solid #1e3f7a;
@@ -157,15 +157,18 @@ QFrame#Separator { background-color: #444444; }
 
 
 class VesperaPlateSolver:
-    """Advanced plate solving for Vespera Pro with astrometry.net integration."""
+    """Advanced plate solving for Vespera Pro 16‑bit TIFF images that
+    bridge the gap between Vespera's output and the final stretch,
+    eliminating repetitive manual steps while preserving full control over each stage.
+    """
 
-    def __init__(self, siril_interface, filename=None):
+    def __init__(self, siril_interface, filename=None, pixel_size_um=2.00):
         self.siril = siril_interface
         self.filename = filename
         self.dso_name = None
         self.applied_coordinates = None
         self.focal_length_mm = 249.47
-        self.pixel_size_um = 2.00
+        self.pixel_size_um = pixel_size_um
 
         # Extract DSO name immediately
         if filename:
@@ -431,7 +434,8 @@ class PrepWorker(QThread):
         """Run plate solving with DSO identification and coordinate lookup."""
         try:
             filename = self._get_current_filename()
-            plate_solver = VesperaPlateSolver(self.siril, filename)
+            plate_solver = VesperaPlateSolver(self.siril, filename,
+                                              pixel_size_um=self.options['pixel_size_um'])
 
             # Use manual DSO name if provided
             if self.manual_dso_name and plate_solver._validate_dso_name(self.manual_dso_name):
@@ -445,8 +449,12 @@ class PrepWorker(QThread):
                 return False
 
             success = plate_solver.plate_solve()
-            self.siril.log("Plate solving completed successfully!" if success else "Plate solving failed",
-                          LogColor.GREEN if success else LogColor.SALMON)
+            self.siril.log("Plate solving completed successfully!" if success
+                           else "Plate solving failed", LogColor.GREEN if success else LogColor.SALMON)
+
+            if not success:
+                self.siril.log("Check telescope selection (Vespera II/Pro) and DSO name and retry.", LogColor.SALMON)
+
             return success
 
         except Exception as e:
@@ -457,11 +465,19 @@ class PrepWorker(QThread):
         """Get coordinates from SIMBAD with manual fallback."""
         simbad_coords = None
         if plate_solver.dso_name and plate_solver._validate_dso_name(plate_solver.dso_name):
+            # Try SIMBAD first
             simbad_coords = plate_solver._query_simbad_coordinates(plate_solver.dso_name)
             if simbad_coords:
                 plate_solver.applied_coordinates = simbad_coords
+                # Query succeeded – reset failure flag
+                self.simbad_query_failed = False
+            else:
+                # SIMBAD failed – ask user for a manual DSO name
+                self.simbad_query_failed = True
+                self._request_manual_dso_entry(plate_solver)
         else:
-            # Request manual DSO entry from main thread
+            # No valid DSO name – request manual entry
+            self.simbad_query_failed = True
             self._request_manual_dso_entry(plate_solver)
 
     def _request_manual_dso_entry(self, plate_solver):
@@ -500,7 +516,7 @@ class PrepWorker(QThread):
         filter_name = self.options.get('spcc_filter', 'No Filter').strip()
         self.siril.log(f"SPCC filter selected: {filter_name}", LogColor.BLUE)  # debug
 
-        spcc_sensor = "Sony IMX676"
+        spcc_sensor = self.options['spcc_sensor']
 
         if filter_name == "City Light Pollution":
             # CLS filter – use oscfilter
@@ -643,6 +659,23 @@ class VesperaQuickPrepWindow(QMainWindow):
         cal_group = QGroupBox("Calibration")
         cal_layout = QVBoxLayout(cal_group)
 
+        # Sensor selection group – now centered
+        self.sensor_group = QButtonGroup(self)
+        sensor_hbox = QHBoxLayout()
+        self.sensor_vesperaII = QRadioButton("Vespera II")
+        self.sensor_vesperaPro = QRadioButton("Vespera Pro")
+        self.sensor_group.addButton(self.sensor_vesperaII, 0)
+        self.sensor_group.addButton(self.sensor_vesperaPro, 1)
+        # Default to Pro
+        self.sensor_vesperaPro.setChecked(True)
+
+        sensor_hbox.addStretch()
+        sensor_hbox.addWidget(self.sensor_vesperaII)
+        sensor_hbox.addWidget(self.sensor_vesperaPro)
+        sensor_hbox.addStretch()
+        cal_layout.addLayout(sensor_hbox)
+
+        # Plate Solve checkbox
         self.plate_solve_cb = QCheckBox("Plate Solve")
         self.plate_solve_cb.setChecked(True)
         self.plate_solve_cb.setToolTip(
@@ -669,13 +702,16 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.spcc_cb.setChecked(True)
 
         # Force plate solving when SPCC is enabled (SPCC requires plate solving)
-        self.spcc_cb.stateChanged.connect(self._on_spcc_state_changed)   # ← updated signal
+        self.spcc_cb.stateChanged.connect(self._on_spcc_state_changed)
         self.spcc_cb.toggled.connect(self._update_spcc_filter_visibility)
         self.spcc_cb.setToolTip(
             "Calibrate colors using Gaia star catalog.\n"
             "Produces accurate, natural star colors."
         )
         cal_layout.addWidget(self.spcc_cb)
+
+        # New logic: uncheck SPCC if Plate Solve is unchecked
+        self.plate_solve_cb.stateChanged.connect(self._on_plate_solve_state_changed)
 
         self.spcc_filter_combo = QComboBox()
         self.spcc_filter_combo.addItems(
@@ -700,8 +736,7 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.denoise_silentium = QRadioButton("VeraLux Silentium (wavelet, PSF-aware)")
         self.denoise_silentium.setToolTip(
             "Physics-based wavelet denoiser.\n"
-            "Uses actual star geometry for protection.\n"
-            "Deterministic and precise."
+            "Uses actual star geometry for protection."
         )
         self.denoise_button_group.addButton(self.denoise_silentium, 1)
         denoise_layout.addWidget(self.denoise_silentium)
@@ -771,6 +806,13 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.spcc_cb.setChecked(
             self.settings.value("spcc", True, type=bool))
 
+        # Load sensor selection
+        sensor_id = self.settings.value("sensor", 1, type=int)
+        if sensor_id == 0:
+            self.sensor_vesperaII.setChecked(True)
+        else:
+            self.sensor_vesperaPro.setChecked(True)
+
         denoise = self.settings.value("denoise_method", 0, type=int)
         self.denoise_button_group.button(denoise).setChecked(True)
 
@@ -786,6 +828,8 @@ class VesperaQuickPrepWindow(QMainWindow):
         self.settings.setValue("smoothing", self.smoothing_slider.value())
         self.settings.setValue("plate_solve", self.plate_solve_cb.isChecked())
         self.settings.setValue("spcc", self.spcc_cb.isChecked())
+        # Save sensor selection
+        self.settings.setValue("sensor", self.sensor_group.checkedId())
         self.settings.setValue("denoise_method", self.denoise_button_group.checkedId())
         self.settings.setValue("launch_hms", self.launch_hms_cb.isChecked())
 
@@ -800,6 +844,15 @@ class VesperaQuickPrepWindow(QMainWindow):
         denoise_id = self.denoise_button_group.checkedId()
         denoise_methods = {0: 'none', 1: 'silentium', 2: 'graxpert', 3: 'cosmic'}
 
+        sensor_id = self.sensor_group.checkedId()
+        # Map sensor to pixel size and SPCC sensor
+        if sensor_id == 0:   # Vespera II
+            pixel_size_um = 2.9
+            spcc_sensor = "Sony IMX585"
+        else:                # Vespera Pro
+            pixel_size_um = 2.00
+            spcc_sensor = "Sony IMX676"
+
         return {
             'bge_method': bge_methods.get(bge_id, 'graxpert'),
             'bge_smoothing': self.smoothing_slider.value() / 100.0,
@@ -810,31 +863,42 @@ class VesperaQuickPrepWindow(QMainWindow):
             'denoise_strength': 0.5,
             'launch_hms': self.launch_hms_cb.isChecked(),
             'optimize_format': True,
-            'continue_on_failure': True
+            'continue_on_failure': True,
+            'pixel_size_um': pixel_size_um,
+            'spcc_sensor': spcc_sensor
         }
 
+    def _on_plate_solve_state_changed(self, state):
+        """If Plate Solve is unchecked while SPCC is checked,
+           automatically uncheck SPCC (SPCC requires plate solving)."""
+        if state == Qt.CheckState.Unchecked.value and self.spcc_cb.isChecked():
+            self.spcc_cb.blockSignals(True)
+            self.spcc_cb.setChecked(False)
+            self.spcc_cb.blockSignals(False)
+
+        self._update_spcc_filter_visibility()
+    
     def _on_spcc_state_changed(self, state: int):
-        """Enable plate solving when SPCC is enabled; disable it if SPCC is turned off."""
-        # Existing behaviour: enable plate solving when SPCC checked
+        """Enable plate solving when SPCC is enabled; do nothing when SPCC is disabled."""
         if state == Qt.CheckState.Checked.value:
             if not self.plate_solve_cb.isChecked():
                 self.plate_solve_cb.setChecked(True)
                 self.siril.log("Plate solving enabled (required for SPCC)", LogColor.BLUE)
 
-        # New behaviour: disable plate solving when SPCC unchecked
-        else:
-            if self.plate_solve_cb.isChecked():
-                self.plate_solve_cb.setChecked(False)
-                self.siril.log("Plate solving disabled because SPCC was turned off", LogColor.BLUE)
+        self._update_spcc_filter_visibility()
 
     def _update_spcc_filter_visibility(self, checked: bool | None = None):
         """
-        Show the filter combo when SPCC is enabled.
-        If *checked* is None, use the current checkbox state.
+        Show the filter combo only when SPCC is enabled *and* Plate Solve
+        is also checked.  The argument `checked` comes from the SPCC
+        checkbox toggle; if None we use its current state.
         """
         if checked is None:
             checked = self.spcc_cb.isChecked()
-        self.spcc_filter_combo.setVisible(checked)
+        # Visible only when both SPCC and Plate Solve are active
+        visible = checked and self.plate_solve_cb.isChecked()
+        self.spcc_filter_combo.setVisible(visible)
+
 
     def _update_dso_input_visibility(self):
         """Show DSO input when needed for plate solving."""
