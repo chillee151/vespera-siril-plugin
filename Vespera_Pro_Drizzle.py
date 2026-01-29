@@ -428,9 +428,9 @@ class ProcessingThread(QThread):
             elif color == LogColor.GREEN:
                 self.log_area.setTextColor(Qt.GlobalColor.darkGreen)
             elif color == LogColor.BLUE:
-                self.log_area.setTextColor(Qt.GlobalColor.blue)
+                self.log_area.setTextColor(Qt.GlobalColor.cyan)
             elif color == LogColor.SALMON:
-                self.log_area.setTextColor(Qt.GlobalColor.SALMON)
+                self.log_area.setTextColor(Qt.GlobalColor.magenta)
             else:
                 self.log_area.setTextColor(Qt.GlobalColor.lightGray)
 
@@ -496,6 +496,14 @@ class ProcessingThread(QThread):
 
         os.makedirs(process_dir, exist_ok=True)
         os.makedirs(masters_dir, exist_ok=True)
+
+        if self.folder_structure == 'native':
+            moved_count = self._move_tiff_to_reference(lights_dir)
+        else:  # organized
+            moved_count = self._move_tiff_to_reference(lights_dir)
+
+        if moved_count:
+            self._log(f"Moved {moved_count} TIFF reference image(s) to 'reference/'", LogColor.SALMON)
 
         # Count files
         if self.folder_structure == 'native':
@@ -748,7 +756,7 @@ class ProcessingThread(QThread):
     def _process_narrowband(self, channel: str, stack_method: dict,
                            sigma_low: float, sigma_high: float) -> None:
         """Generic narrowband processing"""
-        self._log(f"Narrowband {channel} extraction")
+        self._log(f"Narrowband {channel} extraction", LogColor.BLUE)
         self.progress.emit(ProcessingProgress.CALIBRATION, f"Calibrating for {channel}...")
         seq_name = self.light_seq_name
         self._calibrate(seq_name, stack_method)
