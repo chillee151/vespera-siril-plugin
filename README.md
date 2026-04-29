@@ -58,10 +58,6 @@ Bayer Drizzle processing for restacking raw Vespera FITS files with improved qua
 - **32-bit Linear Output** - Maximum precision for post-processing
 - **VeraLux Compatible** - ICC profile removal for clean handoff
 
-## Screenshots
-
-*Coming soon*
-
 ## Requirements
 
 - **Siril 1.4+** with Python plugin support
