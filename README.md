@@ -10,8 +10,60 @@ Python plugins for [Siril](https://siril.org/) that provide optimized workflows 
 
 | Plugin | Purpose |
 |--------|---------|
+| **Vespera FTP Browser** | Browse & preview images on telescope or local folders |
 | **Vespera Pro Drizzle** | Bayer Drizzle stacking for raw FITS files |
 | **Vespera Quick Prep** | One-click preparation for 16-bit TIFFs → VeraLux HMS |
+
+---
+
+## Vespera FTP Browser
+
+A visual browser for exploring observation sessions directly on your Vespera Pro telescope or from local folders, with auto-stretched TIFF previews.
+
+### Features
+
+- **FTP Mode**: Connect directly to Vespera Pro via WiFi (default: 10.0.0.1)
+- **Local Mode**: Browse downloaded observation sessions on your computer
+- **Auto-Stretch Preview**: View 16-bit TIFFs with Screen Transfer Function (STF) to reveal faint details
+- **Session Statistics**: See sub count, integration time, and dark frame availability
+- **Quick Access**: Download sessions or open directly in Siril with one click
+- **Dark Theme**: Matches Siril's interface
+
+### Usage
+
+#### FTP Mode (Direct from Telescope)
+
+1. Connect your computer to Vespera Pro's WiFi network
+2. Open Siril → **Scripts** → **Vespera_FTP_Browser**
+3. Click **Connect** (default host: 10.0.0.1)
+4. Browse sessions in the tree view
+5. Click a session to see statistics and preview
+6. Click **Download Session** to save locally
+
+#### Local Mode (Downloaded Sessions)
+
+1. Switch to **Local Folder** mode using the dropdown
+2. Click **Browse...** to select a folder containing Vespera sessions
+3. Browse and preview sessions
+4. Click **Open in Siril** to set the working directory
+
+### Preview Auto-Stretch
+
+The plugin applies Screen Transfer Function (STF) auto-stretch to display linear TIFF data. This reveals faint nebulosity and galaxy detail that appears nearly black in the raw linear data.
+
+### Vespera Folder Structure
+
+The browser understands Vespera Pro's folder naming convention:
+
+```
+YYYY-MM-DD_HH-MM-SS_observation_TARGET/
+├── 01-images-initial/     # Raw FITS subs + stacked TIFF
+│   ├── img-0001.fits
+│   └── stack.tif          # Preview image
+├── reference/             # Alternative TIFF location
+├── masters/               # Calibration frames
+└── img-XXXX-dark.fits     # Dark frame (if captured)
+```
 
 ---
 
@@ -72,22 +124,36 @@ Bayer Drizzle processing for restacking raw Vespera FITS files with improved qua
 
 ### macOS
 
-Copy both plugins to your Siril scripts directory:
-
+Option 1 - Copy plugins:
 ```bash
-cp Vespera_Pro_Drizzle.py Vespera_Quick_Prep.py ~/Library/Application\ Support/org.siril.Siril/siril-scripts/
+cp Vespera_*.py ~/Library/Application\ Support/org.siril.Siril/scripts/
+```
+
+Option 2 - Symlink (recommended for development):
+```bash
+for f in Vespera_*.py; do
+  ln -sf "$(pwd)/$f" ~/Library/Application\ Support/org.siril.Siril/scripts/
+done
 ```
 
 ### Linux
 
+Option 1 - Copy plugins:
 ```bash
-cp Vespera_Pro_Drizzle.py Vespera_Quick_Prep.py ~/.local/share/siril/scripts/
+cp Vespera_*.py ~/.local/share/siril/scripts/
+```
+
+Option 2 - Symlink:
+```bash
+for f in Vespera_*.py; do
+  ln -sf "$(pwd)/$f" ~/.local/share/siril/scripts/
+done
 ```
 
 ### Windows
 
+Copy all `Vespera_*.py` files to:
 ```
-Copy both .py files to:
 %LOCALAPPDATA%\siril\scripts\
 ```
 
